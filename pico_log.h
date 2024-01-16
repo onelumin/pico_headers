@@ -260,32 +260,25 @@ void log_display_file(log_appender_t id, bool enabled);
  */
 void log_display_function(log_appender_t id, bool enabled);
 
+#ifndef PICO_LOG_NO_FILE
+
 /**
  * @brief Logs a TRACE an INFO message
  *
  * Writes a TRACE level message to the log. Usage is similar to printf
  * (i.e. log_trace(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_trace(...) \
         log_write(LOG_LEVEL_TRACE, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define log_trace(...) \
-        log_write(LOG_LEVEL_TRACE, NULL, 0, __func__, __VA_ARGS__)
-#endif
+
 /**
  * @brief Logs a DEBUG message
  *
  * Writes a DEBUG level message to the log. Usage is similar to printf (i.e.
  * (i.e. log_debug(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_debug(...) \
         log_write(LOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define log_debug(...) \
-        log_write(LOG_LEVEL_DEBUG, NULL, 0, __func__, __VA_ARGS__)
-#endif
 
 /**
  * @brief Logs an INFO message
@@ -293,13 +286,8 @@ void log_display_function(log_appender_t id, bool enabled);
  * Writes an INFO level message to the log. Usage is similar to printf
  * (i.e. log_info(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_info(...) \
         log_write(LOG_LEVEL_INFO,  __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define log_info(...) \
-        log_write(LOG_LEVEL_INFO,  NULL, 0, __func__, __VA_ARGS__)
-#endif
 
 /**
  * @brief Logs a WARN message
@@ -307,13 +295,8 @@ void log_display_function(log_appender_t id, bool enabled);
  * Writes a WARN level message to the log. Usage is similar to printf (i.e.
  * (i.e. log_warn(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_warn(...) \
         log_write(LOG_LEVEL_WARN,  __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define log_warn(...) \
-        log_write(LOG_LEVEL_WARN,  NULL, 0, __func__, __VA_ARGS__)
-#endif
 
 /**
  * @brief Logs an ERROR message
@@ -321,13 +304,8 @@ void log_display_function(log_appender_t id, bool enabled);
  * Writes a ERROR level message to the log. Usage is similar to printf (i.e.
  * (i.e. log_error(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_error(...) \
         log_write(LOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define log_error(...) \
-        log_write(LOG_LEVEL_ERROR, NULL, 0, __func__, __VA_ARGS__)
-#endif
 
 /**
  * @brief Logs a FATAL message
@@ -335,13 +313,30 @@ void log_display_function(log_appender_t id, bool enabled);
  * Writes a FATAL level message to the log.. Usage is similar to printf (i.e.
  * (i.e. log_fatal(format, args...))
  */
-#ifndef PICO_LOG_NO_FILE
 #define log_fatal(...) \
         log_write(LOG_LEVEL_FATAL, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
+
+#else // PICO_LOG_NO_FILE
+
+#define log_trace(...) \
+        log_write(LOG_LEVEL_TRACE, NULL, 0, __func__, __VA_ARGS__)
+
+#define log_debug(...) \
+        log_write(LOG_LEVEL_DEBUG, NULL, 0, __func__, __VA_ARGS__)
+
+#define log_info(...) \
+        log_write(LOG_LEVEL_INFO,  NULL, 0, __func__, __VA_ARGS__)
+
+#define log_warn(...) \
+        log_write(LOG_LEVEL_WARN,  NULL, 0, __func__, __VA_ARGS__)
+
+#define log_error(...) \
+        log_write(LOG_LEVEL_ERROR, NULL, 0, __func__, __VA_ARGS__)
+
 #define log_fatal(...) \
         log_write(LOG_LEVEL_FATAL, NULL, 0, __func__, __VA_ARGS__)
-#endif
+
+#endif // PICO_LOG_NO_FILE
 
 /**
  * WARNING: It is inadvisable to call this function directly. Use the macros
@@ -855,61 +850,59 @@ log_write (log_level_t level, const char* file, unsigned line,
         if (!log_appender_enabled(i))
             continue;
 
-        if (log_appenders[i].log_level <= level)
+        if (log_appenders[i].log_level > level)
+            continue;
+
+        char entry_str[LOG_ENTRY_LEN + 1];
+        entry_str[0] = '\0'; // Ensure the entry is null terminated
+
+        // Append a timestamp
+        if (appender->timestamp)
         {
-            char entry_str[LOG_ENTRY_LEN + 1]; // Ensure there is space for
-                                              // null char
+            log_append_timestamp(entry_str, appender->time_fmt);
+        }
 
-            entry_str[0] = '\0'; // Ensure the entry is null terminated
+        // Append the logger level
+        if (appender->level)
+        {
+            log_append_level(entry_str, level, appender->colors);
+        }
 
-            // Append a timestamp
-            if (appender->timestamp)
-            {
-                log_append_timestamp(entry_str, appender->time_fmt);
-            }
+        // Append the filename/line number
+        if (appender->file && file)
+        {
+            log_append_file(entry_str, file, line);
+        }
 
-            // Append the logger level
-            if (appender->level)
-            {
-                log_append_level(entry_str, level, appender->colors);
-            }
+        // Append the function name
+        if (appender->func)
+        {
+            log_append_func(entry_str, func, appender->colors);
+        }
 
-            // Append the filename/line number
-            if (appender->file && file)
-            {
-                log_append_file(entry_str, file, line);
-            }
+        // Append the log message
+        char msg_str[LOG_MSG_LEN];
 
-            // Append the function name
-            if (appender->func)
-            {
-                log_append_func(entry_str, func, appender->colors);
-            }
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(msg_str, sizeof(msg_str), fmt, args);
+        va_end(args);
 
-            // Append the log message
-            char msg_str[LOG_MSG_LEN];
+        strncat(entry_str, msg_str, LOG_MSG_LEN);
+        strcat(entry_str, "\n");
 
-            va_list args;
-            va_start(args, fmt);
-            vsnprintf(msg_str, sizeof(msg_str), fmt, args);
-            va_end(args);
+        // Locks the appender
+        if (NULL != appender->lock_fp)
+        {
+            appender->lock_fp(true, appender->lock_udata);
+        }
 
-            strncat(entry_str, msg_str, LOG_MSG_LEN);
-            strcat(entry_str, "\n");
+        appender->appender_fp(entry_str, appender->udata);
 
-            // Locks the appender
-            if (NULL != appender->lock_fp)
-            {
-                appender->lock_fp(true, appender->lock_udata);
-            }
-
-            appender->appender_fp(entry_str, appender->udata);
-
-            // Unlocks the appender
-            if (NULL != appender->lock_fp)
-            {
-                appender->lock_fp(false, appender->lock_udata);
-            }
+        // Unlocks the appender
+        if (NULL != appender->lock_fp)
+        {
+            appender->lock_fp(false, appender->lock_udata);
         }
     }
 }
